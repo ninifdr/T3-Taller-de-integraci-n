@@ -7,17 +7,17 @@ import io from 'socket.io-client';
 import $ from 'jquery';
 import { useEffect, useState } from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie
 } from 'recharts';
 import {
-  max, min
+  max, min, random, round
 } from 'mathjs'
 
 const socket = io('wss://le-18262636.bitzonte.com', {
   path: '/stocks'
 });
 
-
+var tickerdict = {};
 
 $('#connect_button').on('click', function(){
   socket.connect();
@@ -35,15 +35,37 @@ const Stocks = ({}) => {
   const [updates, setUpdates] = useState([]);
   const [stocks, setStocks] = useState([]);
   const [exchanges, setExchanges] = useState([]);
+  const [buys, setBuys] = useState([]);
+  const [sells, setSells] = useState([]);
+  const [volumen_total, setVolumen] = useState(0);
 
   useEffect(() =>{
+    // ESCUCHANDO
     socket.on('UPDATE', update => {
       var date = new Date(update.time*1000);
       setUpdates(currentData => [...currentData, {"ticker": update.ticker, "time": date, "value": update.value }]);
     });
+    socket.on('BUY', buy =>{
+      var date = new Date(buy.time*1000);
+      setBuys(currentData => [...currentData, {"ticker": buy.ticker, "time": date, "volume": buy.volume }]);
+      //console.log(buy.volume);
+      setVolumen(volumen_total => volumen_total + buy.volume);
+    })
+    socket.on('SELL', sell =>{
+      var date = new Date(sell.time*1000);
+      setSells(currentData => [...currentData, {"ticker": sell.ticker, "time": date, "volume": sell.volume }]);
+      //console.log(sell.volume);
+      setVolumen(volumen_total => volumen_total + sell.volume);
+    })
+    //EMITO, LUEGO ESCUCHO
     socket.emit('STOCKS');
     socket.on('STOCKS', data => {
       setStocks(currentData => data);
+      for(var d in data)
+      {
+        tickerdict[data[d].company_name] = data[d].ticker;
+      }
+      //console.log(tickerdict);
     });
     socket.emit('EXCHANGES');
     socket.on('EXCHANGES', data => {
@@ -51,9 +73,56 @@ const Stocks = ({}) => {
     });
   }, []);
 
+  var table = [];
+  var pie_chart = [];
+  //console.log(buys);
+  //console.log(sells);
+
+  for(var ex in exchanges)
+  {
+    var volumen_compra = 0;
+    var volumen_venta = 0;
+    var acciones = [];
+    var exchange = exchanges[ex];
+    //console.log(exchange);
+    acciones = exchange.listed_companies;
+    //console.log(acciones);
+    for(var accion in acciones)
+    {
+      //console.log(tickerdict);
+      var ticker = tickerdict[acciones[accion]];
+      //console.log(ticker);
+      var buys_ticker = buys.filter(b => b.ticker === ticker);
+      //console.log(buys_ticker);
+      var sells_ticker = sells.filter(s => s.ticker === ticker);
+      for (var buy in buys_ticker)
+      {
+        //console.log(buys[buy].volume);
+        volumen_compra += buys_ticker[buy].volume;
+      };
+      for (var sell in sells_ticker)
+      {
+        volumen_venta += sells_ticker[sell].volume;
+      };
+    };
+    if(volumen_total > 0)
+    {
+      //pie_chart[exchange.name] = (volumen_compra + volumen_venta)/volumen_total;
+      pie_chart.push({"name": exchange.name, "value": round(((volumen_compra + volumen_venta)/volumen_total)*100)});
+    }
+    table.push(<tr>
+    <td>{exchange.name}</td>
+    <td>{volumen_compra}</td>
+    <td>{volumen_venta}</td>
+    <td>{volumen_compra+volumen_venta}</td>
+    <td>{acciones.length}</td>
+    <td>{round(((volumen_compra + volumen_venta)/volumen_total)*100)}%</td>
+  </tr>)
+
+  };
+
+
   var graphs = [];
-  //console.log(stocks);
-  //stocks.forEach(element => graphs += element.ticker);
   for(var empresa in stocks)
   {
     var elem = stocks[empresa];
@@ -65,7 +134,7 @@ const Stocks = ({}) => {
     var var_porcentual;
     var prices = updates.filter(update => update.ticker === elem.ticker);
     var valores_totales = prices.map(function(p){ return p.value } );
-    if(valores_totales.length != 0)
+    if(valores_totales.length !== 0)
     {
       maximo_historico = max(valores_totales);
       minimo_historico = min(valores_totales);
@@ -77,16 +146,16 @@ const Stocks = ({}) => {
       }
     }
     //console.log(elem.ticker);
-    graphs.push(<div id={elem.ticker}>
-    <h2>Empresa: {elem.ticker}</h2>
+    graphs.push(<div>
+    <h2>Empresa: {elem.company_name}</h2>
     <h3>Moneda: {elem.quote_base}</h3>
+    <h3>País: {elem.country}</h3>
     <p>Valor máximo: {maximo_historico}</p>
     <p>Valor mínimo: {minimo_historico}</p>
     <p>Último precio: {ultimo_valor}</p>
     <p>Variación porcentual: {var_porcentual}%</p>
-
     <LineChart
-      width={500}
+      width={1000}
       height={300}
       data={prices}
       margin={{
@@ -104,6 +173,23 @@ const Stocks = ({}) => {
   };
   return(
     <div>
+      <h1>Mercado de valores</h1>
+      <table>
+      <tr>
+        <th>Nombre</th>
+        <th>Volumen de compra</th>
+        <th>Volumen de venta</th>
+        <th>Volumen total</th>
+        <th>Número de acciones</th>
+        <th>Porcentaje de Mercado</th>
+      </tr>
+      {table}
+      </table>
+      <h1>Gráfico Porcentajes de mercado</h1>
+      <PieChart width={400} height={400}>
+        <Pie dataKey="value" isAnimationActive={false} data={pie_chart} cx={200} cy={200} outerRadius={80} fill="#8884d8" label/>
+        <Tooltip />
+      </PieChart>
       <h1>Precio acciones</h1>
       {graphs}
     </div>
